@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>音源を見る</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#f2ebdb;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+canvas{display:block;width:100%;height:100%;touch-action:none}
+
+/* 支援者メニューを開く丸（子どもからは目立たない位置・濃さ） */
+#gear{position:fixed;top:12px;right:12px;width:44px;height:44px;border:none;border-radius:50%;background:transparent;padding:0;opacity:.2;cursor:pointer;transition:opacity .3s;z-index:5}
+#gear.hold{opacity:.6}
+#gear svg{width:100%;height:100%;display:block}
+
+/* 支援者用の操作（文字なし・うすい色・小さく） */
+#dock{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom) + 30px);display:flex;gap:18px;z-index:4}
+#dock button{width:44px;height:44px;border:none;background:transparent;padding:6px;opacity:.38;cursor:pointer;transition:opacity .2s}
+#dock button:active{opacity:.8}
+#dock svg{width:100%;height:100%;display:block}
+
+/* 遊び方の説明（支援者用。子どもの画面に入る前に、数秒で消える） */
+#intro{position:fixed;inset:0;z-index:12;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(242,235,219,.94);transition:opacity .6s ease}
+#intro.hide{opacity:0;pointer-events:none}
+#intro .card{max-width:540px;width:100%;display:flex;flex-direction:column;gap:14px;font-family:'Hiragino Sans','Hiragino Kaku Gothic ProN',system-ui,sans-serif;color:#3a3326}
+#intro h1{font-size:22px;margin:0;font-weight:700}
+#intro .lead{font-size:16px;line-height:1.7;margin:0}
+#intro ol{margin:0;padding-left:1.4em;font-size:17px;line-height:1.75}
+#intro .note{font-size:13px;line-height:1.6;color:#6e6552;margin:0}
+#intro button{align-self:flex-start;font:inherit;font-size:17px;min-height:50px;padding:0 26px;border-radius:12px;border:none;background:#4a6442;color:#fff;cursor:pointer}
+
+/* 支援者メニュー */
+#panel{position:fixed;inset:0;background:rgba(40,36,28,.38);display:none;align-items:center;justify-content:center;padding:16px;z-index:10}
+#panel.open{display:flex}
+.sheet{background:#fbf7ee;border-radius:20px;padding:22px 20px;width:100%;max-width:460px;max-height:92vh;overflow:auto;display:flex;flex-direction:column;gap:16px;font-family:'Hiragino Sans','Hiragino Kaku Gothic ProN',system-ui,sans-serif;color:#3a3326;box-shadow:0 8px 24px rgba(0,0,0,.14)}
+.sheet h1{font-size:19px;margin:0;font-weight:700}
+.note{font-size:13px;line-height:1.6;margin:0;color:#6e6552}
+.row{display:flex;flex-direction:column;gap:8px}
+.row h2{font-size:14px;margin:0;color:#5a5040;font-weight:600}
+.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px}
+.opt{font:inherit;font-size:16px;min-height:50px;padding:6px 8px;border-radius:12px;border:1.5px solid #cdbf9f;background:#fffdf8;color:#3a3326;cursor:pointer}
+.opt[aria-pressed="true"]{background:#4a6442;border-color:#4a6442;color:#fff}
+.opt.wide{grid-column:1/-1}
+.sheet .close{font:inherit;font-size:16px;min-height:50px;border-radius:12px;border:none;background:#8a8270;color:#fff;cursor:pointer}
+.sheet .stop{font:inherit;font-size:16px;min-height:50px;border-radius:12px;border:none;background:#b5603f;color:#fff;cursor:pointer}
+input[type=range]{width:100%;accent-color:#4a6442}
+.vol{display:flex;align-items:center;gap:12px}
+.vol b{min-width:3.2em;text-align:right;font-size:16px}
+button:focus-visible,input:focus-visible{outline:3px solid #e0b24a;outline-offset:2px}
+</style>
+</head>
+<body>
+
+<canvas id="stage" aria-label="音源を見るあそびの画面"></canvas>
+
+<div id="intro" role="dialog" aria-labelledby="introTitle">
+  <div class="card">
+    <h1 id="introTitle">音源を見る（支援者用の説明）</h1>
+    <p class="lead">子どもから1〜2m離れて、子どもから見えない所で音を鳴らします。</p>
+    <ol>
+      <li>「音符」で音を鳴らす。はじめは声をかけない。</li>
+      <li>子どもが音の方を見たら、「目」で物を見せる。</li>
+      <li>音の方を見ないときは、声をかけて音の方へ注目を促す。</li>
+      <li>止めたいときは「四角」。過敏な反応が見えたら、すぐ止める。</li>
+    </ol>
+    <p class="note">この説明は、子どもの画面には出ません。数秒で消えます。</p>
+    <button id="introBtn" type="button">はじめる</button>
+  </div>
+</div>
+
+<div id="dock">
+  <button id="ringBtn" aria-label="音を鳴らす（支援者用）" title="音を鳴らす">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V6l10-2v12" fill="none" stroke="#3a3326" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7" cy="18" r="2.6" fill="#3a3326"/><circle cx="17" cy="16" r="2.6" fill="#3a3326"/></svg>
+  </button>
+  <button id="showBtn" aria-label="物を見せる（支援者用）" title="物を見せる">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12c3-5 7-7 10-7s7 2 10 7c-3 5-7 7-10 7S5 17 2 12z" fill="none" stroke="#3a3326" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="12" r="3.2" fill="#3a3326"/></svg>
+  </button>
+  <button id="stopBtn" aria-label="音を止める（支援者用）" title="音を止める">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="#3a3326"/></svg>
+  </button>
+</div>
+
+<button id="gear" aria-label="支援者メニュー（長押し）" title="長押しで支援者メニュー">
+  <svg viewBox="0 0 44 44" aria-hidden="true">
+    <circle cx="13" cy="22" r="3" fill="#3a3326"/><circle cx="22" cy="22" r="3" fill="#3a3326"/><circle cx="31" cy="22" r="3" fill="#3a3326"/>
+  </svg>
+</button>
+
+<div id="panel" role="dialog" aria-modal="true" aria-labelledby="ptitle">
+  <div class="sheet">
+    <h1 id="ptitle">支援者メニュー</h1>
+    <p class="note">画面の下の3つのボタンは、左から「音を鳴らす」「物を見せる」「音を止める」です。子どもの名前や記録は保存しません。音楽ファイルは、この端末の中だけで再生します。</p>
+
+    <div class="row">
+      <h2>楽器（段階）</h2>
+      <div class="opts">
+        <button class="opt" data-set="stage" data-v="bell">A 鈴</button>
+        <button class="opt" data-set="stage" data-v="drum">B 太鼓・タンバリン</button>
+        <button class="opt" data-set="stage" data-v="flute">C 笛</button>
+        <button class="opt" data-set="stage" data-v="music">D 音楽</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <h2>音の方向</h2>
+      <div class="opts">
+        <button class="opt" data-set="dir" data-v="rand">左右（ランダム）</button>
+        <button class="opt" data-set="dir" data-v="left">左</button>
+        <button class="opt" data-set="dir" data-v="right">右</button>
+        <button class="opt" data-set="dir" data-v="center">中央</button>
+      </div>
+      <p class="note">iPadの内蔵スピーカーでは、左右の差がわかりにくいことがあります。そのときは「中央」を使うか、イヤホンや外部スピーカーをつないでください。</p>
+    </div>
+
+    <div class="row">
+      <h2>音量</h2>
+      <div class="vol">
+        <input id="vol" type="range" min="5" max="70" step="5" value="40" aria-label="音量">
+        <b id="volLabel">40%</b>
+      </div>
+    </div>
+
+    <div class="row">
+      <h2>音の高さ</h2>
+      <div class="opts">
+        <button class="opt" data-set="pitch" data-v="low">低め</button>
+        <button class="opt" data-set="pitch" data-v="mid">ふつう</button>
+        <button class="opt" data-set="pitch" data-v="high">高め</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <h2>物の出し方</h2>
+      <div class="opts">
+        <button class="opt" data-set="reveal" data-v="wait">待って見せる</button>
+        <button class="opt" data-set="reveal" data-v="now">すぐ見せる</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <h2>鳴らし方</h2>
+      <div class="opts">
+        <button class="opt" data-set="trig" data-v="manual">大人が鳴らす</button>
+        <button class="opt" data-set="trig" data-v="auto">自動で鳴らす</button>
+      </div>
+      <div class="opts">
+        <button class="opt" data-set="gap" data-v="8">間隔 ゆっくり（8秒）</button>
+        <button class="opt" data-set="gap" data-v="6">間隔 ふつう（6秒）</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <h2>音楽（段階D）</h2>
+      <div class="opts">
+        <button class="opt" data-set="musicSrc" data-v="box">内蔵のオルゴール</button>
+        <button class="opt" data-set="musicSrc" data-v="file">選んだ曲・録音</button>
+      </div>
+      <div class="opts">
+        <button class="opt" id="fileBtn">ファイルを選ぶ（複数可）</button>
+        <button class="opt" id="recBtn" aria-pressed="false">録音する（最長60秒）</button>
+        <button class="opt" id="clearBtn">選んだ曲を消す</button>
+      </div>
+      <p class="note" id="fileName">選んだ曲：なし</p>
+      <input id="musicFile" type="file" accept=".mp3,.m4a,.wav,.aac,.caf,audio/mpeg,audio/mp4,audio/x-m4a,audio/wav,audio/aac,audio/*" multiple hidden>
+      <p class="note" id="recNote">録音は、この端末の中だけに置き、ページを閉じると消えます。歌や楽器の音を録音してください。子どもの声は録音しないでください。</p>
+      <div class="opts">
+        <button class="opt" data-set="musicLimit" data-v="15">15秒</button>
+        <button class="opt" data-set="musicLimit" data-v="30">30秒</button>
+        <button class="opt" data-set="musicLimit" data-v="60">60秒</button>
+        <button class="opt" data-set="musicLimit" data-v="0">止めるまで</button>
+      </div>
+      <p class="note">上の秒数は、音楽が自動で止まるまでの長さです。</p>
+    </div>
+
+    <div class="row">
+      <h2>物を残す</h2>
+      <div class="opts">
+        <button class="opt" data-set="keep" data-v="off">消える（約6秒）</button>
+        <button class="opt" data-set="keep" data-v="on">残す</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <h2>触れたときの音</h2>
+      <div class="opts">
+        <button class="opt" data-set="touchSnd" data-v="on">鳴らす</button>
+        <button class="opt" data-set="touchSnd" data-v="off">鳴らさない</button>
+      </div>
+    </div>
+
+    <div class="row">
+      <h2>音</h2>
+      <div class="opts">
+        <button class="opt" data-set="sound" data-v="on">音：オン</button>
+        <button class="opt" data-set="sound" data-v="off">音：オフ</button>
+      </div>
+    </div>
+
+    <button id="stopPanelBtn" class="stop">音を止める</button>
+    <button id="introAgainBtn" class="opt wide">遊び方の説明を見る</button>
+    <p class="note">音を鳴らした回数：<span id="count">0</span></p>
+    <button id="closeBtn" class="close">閉じる</button>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const cv = $('stage'), ctx = cv.getContext('2d');
+let W = 0, H = 0, DPR = 1, paper = null;
+const reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function makePaper(){
+  paper = document.createElement('canvas');
+  paper.width = Math.round(W * DPR); paper.height = Math.round(H * DPR);
+  const p = paper.getContext('2d'); p.scale(DPR, DPR);
+  for (let i = 0; i < 900; i++){
+    p.fillStyle = Math.random() < 0.5 ? 'rgba(120,96,60,.05)' : 'rgba(255,255,255,.18)';
+    const s = Math.random() * 2.2 + 0.6;
+    p.fillRect(Math.random() * W, Math.random() * H, s, s);
+  }
+}
+function resize(){
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  makePaper();
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ---- 設定 ----
+const S = {
+  stage: 'bell', dir: 'rand', vol: 40, pitch: 'mid', reveal: 'wait', trig: 'manual', gap: 8,
+  keep: false, touchSnd: true, sound: true, musicSrc: 'box', musicLimit: 30, count: 0
+};
+const PITCH = { low: 0.8, mid: 1, high: 1.25 };
+const INK = '#4e4032';
+const rnd = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const jit = i => ((((Math.sin(i * 12.9898) * 43758.5453) % 1) + 1) % 1) * 2 - 1;
+const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+
+// ---- 音（Web Audio）----
+let AC = null, master = null, musicGain = null, mediaSrc = null;
+const audioEl = new Audio();
+audioEl.loop = true;
+// 選んだ曲・録音した曲（この端末の中だけ。保存しない）
+let playlist = [], trackIdx = 0;
+function loadTrack(i){
+  trackIdx = i % playlist.length;
+  audioEl.src = playlist[trackIdx].url;
+  audioEl.loop = playlist.length === 1;
+}
+audioEl.addEventListener('ended', () => {
+  if (musicOn && playlist.length > 1){ loadTrack(trackIdx + 1); audioEl.play().catch(() => {}); }
+});
+
+function ensureAC(){
+  if (!AC){
+    try{ AC = new (window.AudioContext || window.webkitAudioContext)(); }catch(e){ return false; }
+    master = AC.createGain();
+    master.gain.value = S.sound ? S.vol / 100 : 0;
+    master.connect(AC.destination);
+    musicGain = AC.createGain();
+    musicGain.gain.value = 0;
+    musicGain.connect(master);
+  }
+  if (AC.state === 'suspended') AC.resume();
+  return true;
+}
+function applyVol(){
+  if (!AC || !master) return;
+  master.gain.setTargetAtTime(S.sound ? S.vol / 100 : 0, AC.currentTime, 0.03);
+}
+// 鳴っている音を、すぐに止める（出力をつなぎ直す）
+function cutAudio(){
+  if (!AC) return;
+  try{ master.disconnect(); }catch(e){}
+  master = AC.createGain();
+  master.gain.value = S.sound ? S.vol / 100 : 0;
+  master.connect(AC.destination);
+  try{ musicGain.disconnect(); }catch(e){}
+  musicGain.gain.value = 0;
+  musicGain.connect(master);
+  audioEl.pause();
+}
+function outTo(node, p){
+  if (AC.createStereoPanner){
+    const pn = AC.createStereoPanner();
+    pn.pan.value = p;
+    node.connect(pn); pn.connect(master);
+  } else node.connect(master);
+}
+function note(freq, o = {}){
+  if (!AC) return;
+  const { a = 0.12, d = 1.0, g = 0.25, type = 'sine', pan = 0, when = 0, glideTo = null, glideT = 0.2, vib = 0 } = o;
+  const t = AC.currentTime + when, osc = AC.createOscillator(), gn = AC.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, t);
+  if (glideTo) osc.frequency.exponentialRampToValueAtTime(glideTo, t + glideT);
+  if (vib){
+    const l = AC.createOscillator(), lg = AC.createGain();
+    l.frequency.value = 5; lg.gain.value = vib;
+    l.connect(lg); lg.connect(osc.frequency);
+    l.start(t); l.stop(t + a + d + 0.05);
+  }
+  gn.gain.setValueAtTime(0.0001, t);
+  gn.gain.linearRampToValueAtTime(g, t + a);
+  gn.gain.exponentialRampToValueAtTime(0.0001, t + a + d);
+  osc.connect(gn); outTo(gn, pan);
+  osc.start(t); osc.stop(t + a + d + 0.05);
+}
+function noiseBurst(o = {}){
+  if (!AC) return;
+  const { a = 0.1, d = 0.3, g = 0.15, f = 2200, q = 1, pan = 0 } = o;
+  const len = Math.floor(AC.sampleRate * (a + d + 0.1));
+  const buf = AC.createBuffer(1, len, AC.sampleRate), data = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+  const src = AC.createBufferSource(); src.buffer = buf;
+  const bp = AC.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = q;
+  const gn = AC.createGain(), t = AC.currentTime;
+  gn.gain.setValueAtTime(0.0001, t);
+  gn.gain.linearRampToValueAtTime(g, t + a);
+  gn.gain.exponentialRampToValueAtTime(0.0001, t + a + d);
+  src.connect(bp); bp.connect(gn); outTo(gn, pan);
+  src.start(t); src.stop(t + a + d + 0.1);
+}
+// 楽器の音（角の取れた、やわらかい音。立ち上がりは0.1〜0.2秒）
+function voice(kind, pan){
+  const pm = PITCH[S.pitch];
+  if (kind === 'bell'){
+    note(880 * pm, { a: 0.1, d: 1.5, g: 0.28, pan });
+    note(1320 * pm, { a: 0.1, d: 1.1, g: 0.10, pan });
+    note(1760 * pm, { a: 0.1, d: 0.8, g: 0.04, pan });
+  } else if (kind === 'drum'){
+    note(150 * pm, { a: 0.1, d: 0.7, g: 0.5, pan, glideTo: 75 * pm, glideT: 0.3 });
+    note(95 * pm, { a: 0.1, d: 0.5, g: 0.15, type: 'triangle', pan });
+  } else if (kind === 'tamb'){
+    noiseBurst({ a: 0.1, d: 0.35, g: 0.16, f: 2200 * pm, q: 1.1, pan });
+    [0, 0.07, 0.14].forEach((w, i) => note((1500 + i * 220) * pm, { a: 0.1, d: 0.25, g: 0.05, pan, when: w }));
+  } else if (kind === 'flute'){
+    note(660 * pm, { a: 0.18, d: 1.2, g: 0.26, pan, vib: 6 });
+    note(1320 * pm, { a: 0.2, d: 1.0, g: 0.03, pan });
+  }
+}
+// 触れたときの音（木琴のような、ポコッとした小さな音。中央から、音源より小さく）
+function touchSound(){
+  if (!AC || !S.touchSnd) return;
+  note(523, { a: 0.01, d: 0.28, g: 0.12, pan: 0 });
+  note(784, { a: 0.01, d: 0.2, g: 0.035, pan: 0 });
+}
+
+// ---- 音楽（段階D）----
+const BOX = [[659,1],[784,1],[880,1],[784,1],[659,1],[587,1],[523,2],[587,1],[659,1],[784,1],[659,1],[587,1],[523,2],[0,1]];
+let musicOn = false, musicTimer = null, limitTimer = null, boxIdx = 0;
+function boxStep(){
+  if (!musicOn || S.musicSrc !== 'box') return;
+  const [f, b] = BOX[boxIdx++ % BOX.length];
+  if (f){
+    note(f, { a: 0.02, d: 1.1, g: 0.22, pan: 0 });
+    note(f * 2, { a: 0.02, d: 0.5, g: 0.05, pan: 0 });
+  }
+  musicTimer = setTimeout(boxStep, b * 600);
+}
+function startMusic(){
+  if (!ensureAC()) return;
+  stopMusic(true);
+  musicOn = true;
+  if (S.musicSrc === 'file' && playlist.length){
+    if (!mediaSrc){ mediaSrc = AC.createMediaElementSource(audioEl); mediaSrc.connect(musicGain); }
+    musicGain.gain.setTargetAtTime(1, AC.currentTime, 0.3);
+    loadTrack(0);
+    audioEl.play().catch(() => {});
+  } else {
+    boxIdx = 0; boxStep();
+  }
+  if (S.musicLimit > 0) limitTimer = setTimeout(() => stopMusic(), S.musicLimit * 1000);
+  showMusicObj();
+}
+function stopMusic(quiet){
+  musicOn = false;
+  clearTimeout(musicTimer); clearTimeout(limitTimer);
+  if (AC && musicGain) musicGain.gain.setTargetAtTime(0, AC.currentTime, 0.3);
+  setTimeout(() => { if (!musicOn) audioEl.pause(); }, 900);
+  if (!quiet && obj && obj.hold){ obj.hold = false; obj.life = obj.t + 3; }
+}
+
+// ---- 物（動物の顔つきの楽器）----
+let obj = null, pending = null, lastRing = -1e9, autoTimer = null, lastTouch = 0, faceN = 0;
+const FACES = ['bear', 'cat', 'bunny'];
+const SIDES = { left: 0.2, center: 0.5, right: 0.8 };
+
+function pickSide(){ return S.dir === 'rand' ? (Math.random() < 0.5 ? 'left' : 'right') : S.dir; }
+function pickKind(){
+  if (S.stage === 'bell') return 'bell';
+  if (S.stage === 'flute') return 'flute';
+  return Math.random() < 0.5 ? 'drum' : 'tamb';
+}
+function newObj(kind, xr, life, hold){
+  return { kind, face: FACES[faceN++ % 3], xr, t: 0, life, sq: 0, out: null, hold: !!hold,
+    bl: 0, blt: rnd(2, 4), seed: Math.random() * 50 };
+}
+function ring(){
+  const now = performance.now();
+  if (rec || now - lastRing < 1500) return;   // 録音中は鳴らさない
+  lastRing = now;
+  if (!ensureAC()) return;
+  if (S.stage === 'music'){ musicOn ? stopMusic() : startMusic(); return; }
+  if (obj && obj.out == null) obj.out = 0;       // 前の物は、すぐに薄くして消す
+  pending = null;
+  const side = pickSide(), kind = pickKind();
+  voice(kind, side === 'left' ? -1 : side === 'right' ? 1 : 0);
+  pending = { side, kind };
+  S.count++;
+  if (S.reveal === 'now') setTimeout(reveal, 800);
+  scheduleAuto();
+}
+function reveal(){
+  if (S.stage === 'music'){ if (musicOn) showMusicObj(); return; }
+  if (!pending) return;
+  obj = newObj(pending.kind, SIDES[pending.side], S.keep ? 1e9 : 6, false);
+  pending = null;
+}
+function showMusicObj(){ obj = newObj('bell', 0.5, 1e9, true); }
+function scheduleAuto(){
+  clearTimeout(autoTimer);
+  if (S.trig !== 'auto' || S.stage === 'music') return;
+  autoTimer = setTimeout(() => { lastRing = -1e9; ring(); }, S.gap * 1000);
+}
+function stopAll(){
+  clearTimeout(autoTimer); autoTimer = null;
+  pending = null;
+  stopMusic(true);
+  cutAudio();
+  if (obj && obj.out == null) obj.out = 0;
+}
+
+// ---- 手描き風の線 ----
+function smoothClosed(pts){
+  const n = pts.length, m0 = mid(pts[n - 1], pts[0]);
+  ctx.beginPath(); ctx.moveTo(m0.x, m0.y);
+  for (let i = 0; i < n; i++){
+    const p = pts[i], q = pts[(i + 1) % n], m = mid(p, q);
+    ctx.quadraticCurveTo(p.x, p.y, m.x, m.y);
+  }
+  ctx.closePath();
+}
+function inkStroke(width = 2.2){
+  ctx.strokeStyle = INK; ctx.lineWidth = width; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.globalAlpha *= 0.85; ctx.stroke();
+  ctx.globalAlpha /= 0.85;
+}
+function rrPts(x, y, w, h, k){
+  const f = (px, py, i) => ({ x: px + jit(k + i) * 1.6, y: py + jit(k + i + 50) * 1.6 });
+  const a = 0.2, b = 0.8;
+  return [
+    f(x + w * a, y, 0), f(x + w * b, y, 1), f(x + w, y, 2), f(x + w, y + h * a, 3),
+    f(x + w, y + h * b, 4), f(x + w, y + h, 5), f(x + w * b, y + h, 6), f(x + w * a, y + h, 7),
+    f(x, y + h, 8), f(x, y + h * b, 9), f(x, y + h * a, 10), f(x, y, 11)
+  ];
+}
+function drawFace(r, blinking){
+  const eyeY = -0.1 * r;
+  ctx.fillStyle = INK;
+  [-0.34, 0.34].forEach(s => {
+    const x = s * r;
+    if (blinking){
+      ctx.strokeStyle = INK; ctx.lineWidth = 2; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(x - 0.1 * r, eyeY); ctx.lineTo(x + 0.1 * r, eyeY); ctx.stroke();
+    } else {
+      ctx.beginPath(); ctx.ellipse(x, eyeY, 0.085 * r, 0.1 * r, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,.85)';
+      ctx.beginPath(); ctx.arc(x + 0.03 * r, eyeY - 0.035 * r, 0.028 * r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = INK;
+    }
+  });
+  ctx.fillStyle = 'rgba(214,120,96,.32)';
+  [-0.55, 0.55].forEach(s => { ctx.beginPath(); ctx.ellipse(s * r, 0.2 * r, 0.13 * r, 0.08 * r, 0, 0, Math.PI * 2); ctx.fill(); });
+  ctx.strokeStyle = INK; ctx.lineWidth = 1.7; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(0, 0.14 * r, 0.13 * r, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke();
+}
+
+// 4つの楽器（原点が中心）
+function drawBellShape(R, face, bl){
+  const shape = [[-0.55,-0.1],[-0.3,-0.6],[0,-0.78],[0.3,-0.6],[0.55,-0.1],[0.92,0.6],[0,0.78],[-0.92,0.6]];
+  const pts = shape.map(([sx, sy], i) => ({ x: sx * R * 1.25 * (1 + jit(i) * 0.02), y: sy * R * 1.25 * (1 + jit(i + 9) * 0.02) }));
+  smoothClosed(pts); ctx.fillStyle = '#e0b04a'; ctx.fill(); inkStroke(2.2);
+  ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(0, R * 1.2, R * 0.14, 0, Math.PI * 2); ctx.fill();
+  ctx.save(); ctx.translate(0, R * 0.12); drawFace(R * 0.66, bl); ctx.restore();
+}
+function drawDrumShape(R, face, bl){
+  smoothClosed(rrPts(-R * 1.0, -R * 0.55, R * 2.0, R * 1.3, 11));
+  ctx.fillStyle = '#c8775a'; ctx.fill(); inkStroke(2.2);
+  ctx.beginPath(); ctx.ellipse(0, -R * 0.55, R * 1.0, R * 0.3, 0, 0, Math.PI * 2);
+  ctx.fillStyle = '#efe3c8'; ctx.fill(); inkStroke(2.2);
+  ctx.strokeStyle = 'rgba(78,64,50,.25)'; ctx.lineWidth = 2;
+  for (let i = -3; i <= 3; i++){
+    ctx.beginPath(); ctx.moveTo(i * R * 0.28, R * 0.3); ctx.lineTo(i * R * 0.28 + R * 0.14, R * 0.7); ctx.stroke();
+  }
+  ctx.save(); ctx.translate(0, R * 0.2); drawFace(R * 0.6, bl); ctx.restore();
+}
+function drawTambShape(R, face, bl){
+  ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2);
+  ctx.fillStyle = '#efe3c8'; ctx.fill();
+  ctx.strokeStyle = INK; ctx.lineWidth = R * 0.2 + 4; ctx.globalAlpha *= 0.85; ctx.stroke(); ctx.globalAlpha /= 0.85;
+  ctx.strokeStyle = '#c9a06a'; ctx.lineWidth = R * 0.2; ctx.stroke();
+  for (let i = 0; i < 6; i++){
+    const a = i * Math.PI / 3 + 0.3;
+    ctx.beginPath(); ctx.arc(Math.cos(a) * R, Math.sin(a) * R, R * 0.12, 0, Math.PI * 2);
+    ctx.fillStyle = '#e0b04a'; ctx.fill(); inkStroke(1.6);
+  }
+  drawFace(R * 0.62, bl);
+}
+function drawFluteShape(R, face, bl){
+  ctx.save(); ctx.rotate(-0.3);
+  smoothClosed(rrPts(-R * 1.7, -R * 0.3, R * 3.4, R * 0.6, 21));
+  ctx.fillStyle = '#7f9f7a'; ctx.fill(); inkStroke(2.2);
+  ctx.fillStyle = INK;
+  for (let i = 0; i < 4; i++){ ctx.beginPath(); ctx.arc(R * (0.35 + i * 0.36), 0, R * 0.07, 0, Math.PI * 2); ctx.fill(); }
+  ctx.save(); ctx.translate(-R * 0.85, 0); drawFace(R * 0.5, bl); ctx.restore();
+  ctx.restore();
+}
+
+function objAlpha(o){
+  let a;
+  if (o.t < 0.8){ const x = o.t / 0.8; a = x * x * (3 - 2 * x); }
+  else if (o.t > o.life - 3) a = clamp((o.life - o.t) / 3, 0, 1);
+  else a = 1;
+  if (o.out != null) a *= clamp(1 - o.out / 0.4, 0, 1);
+  return a;
+}
+const objR = () => Math.min(W, H) * 0.15;
+
+function updateObj(dt){
+  if (!obj) return;
+  obj.t += dt;
+  obj.sq *= Math.pow(0.88, dt * 60);
+  obj.blt -= dt;
+  if (obj.blt <= 0){ obj.bl = 0.13; obj.blt = rnd(2.5, 4.5); }
+  if (obj.bl > 0) obj.bl -= dt;
+  if (obj.out != null){ obj.out += dt; if (obj.out >= 0.4){ obj = null; return; } }
+  if (obj && obj.t >= obj.life) obj = null;
+}
+
+function drawObj(o){
+  const a = objAlpha(o);
+  if (a <= 0) return;
+  const R = objR();
+  const rise = o.t < 0.8 ? (1 - o.t / 0.8) * 10 : 0;
+  const sway = reduceMotion ? 0 : Math.sin(o.t * 2 * Math.PI / 3 + o.seed);
+  const x = W * o.xr + sway * W * 0.012;
+  const y = H * 0.5 + rise - o.sq * 14;
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.translate(x, y); ctx.rotate(sway * 0.03); ctx.scale(1 + 0.18 * o.sq, 1 - 0.18 * o.sq);
+  const bl = o.bl > 0;
+  if (o.kind === 'bell') drawBellShape(R, o.face, bl);
+  else if (o.kind === 'drum') drawDrumShape(R, o.face, bl);
+  else if (o.kind === 'tamb') drawTambShape(R, o.face, bl);
+  else drawFluteShape(R, o.face, bl);
+  ctx.restore();
+}
+
+// 木の板（角をそろえず、少しゆがませ、木目を入れる）
+function plankPath(b){
+  const wob = i => jit(b.k * 7 + i) * 2.4;
+  ctx.beginPath();
+  ctx.moveTo(b.x + wob(1), b.y + wob(2));
+  ctx.lineTo(b.x + b.w + wob(3), b.y + wob(4));
+  ctx.lineTo(b.x + b.w + wob(5), b.y + b.h + wob(6));
+  ctx.lineTo(b.x + wob(7), b.y + b.h + wob(8));
+  ctx.closePath();
+}
+function drawFrame(){
+  const pw = Math.max(20, W * 0.028), ph = Math.max(20, H * 0.032);
+  const bars = [
+    { x: 0, y: 0, w: W, h: ph, k: 1 }, { x: 0, y: H - ph, w: W, h: ph, k: 2 },
+    { x: 0, y: 0, w: pw, h: H, k: 3 }, { x: W - pw, y: 0, w: pw, h: H, k: 4 }
+  ];
+  bars.forEach(b => {
+    plankPath(b); ctx.fillStyle = '#d6b887'; ctx.fill();
+    ctx.save(); plankPath(b); ctx.clip();
+    ctx.strokeStyle = 'rgba(120,88,50,.16)'; ctx.lineWidth = 1;
+    const horiz = b.w > b.h;
+    for (let i = 1; i < 6; i++){
+      ctx.beginPath();
+      if (horiz){
+        const y = b.y + b.h * i / 6;
+        ctx.moveTo(b.x, y + jit(b.k + i) * 1.5); ctx.lineTo(b.x + b.w, y + jit(b.k + i + 3) * 1.5);
+      } else {
+        const x = b.x + b.w * i / 6;
+        ctx.moveTo(x + jit(b.k + i) * 1.5, b.y); ctx.lineTo(x + jit(b.k + i + 3) * 1.5, b.y + b.h);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+    plankPath(b); inkStroke(1.8);
+  });
+}
+
+// ---- 触れたときのエフェクト（物の色の、小さなしずくと波紋）----
+let fx = [];
+const FX_COL = { bell: '#e0b04a', drum: '#c8775a', tamb: '#e0b04a', flute: '#7f9f7a' };
+function touchFx(o){
+  const R = objR(), ox = W * o.xr, oy = H * 0.5, col = FX_COL[o.kind] || '#e0b04a';
+  for (let i = 0; i < 6; i++){
+    const a = i * Math.PI / 3 + rnd(-0.25, 0.25), sp = rnd(40, 70);
+    fx.push({ x: ox + Math.cos(a) * R * 1.1, y: oy + Math.sin(a) * R * 1.1,
+      vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, r: rnd(3, 5), t: 0, life: 0.7, col });
+  }
+  fx.push({ ring: true, x: ox, y: oy, R: R * 1.05, t: 0, life: 0.5, col });
+}
+function updateFx(dt){
+  fx.forEach(p => { p.t += dt; });
+  fx = fx.filter(p => p.t < p.life);
+}
+function drawFx(){
+  fx.forEach(p => {
+    const k = p.t / p.life;
+    ctx.save();
+    if (p.ring){
+      ctx.globalAlpha = (1 - k) * 0.5;
+      ctx.strokeStyle = p.col; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.R * (1 + k * 0.5), 0, Math.PI * 2); ctx.stroke();
+    } else {
+      ctx.globalAlpha = (1 - k) * 0.7;
+      ctx.fillStyle = p.col;
+      ctx.beginPath(); ctx.arc(p.x + p.vx * p.t, p.y + p.vy * p.t, p.r * (1 - k * 0.5), 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  });
+}
+
+let last = performance.now();
+function frame(now){
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  updateObj(dt);
+  updateFx(dt);
+  ctx.fillStyle = '#f2ebdb';
+  ctx.fillRect(0, 0, W, H);
+  if (paper) ctx.drawImage(paper, 0, 0, W, H);
+  drawFrame();
+  if (obj) drawObj(obj);
+  drawFx();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// ---- 子どもの操作：物に触れたときだけ反応する（空いている所は、何も起きない）----
+cv.addEventListener('pointerdown', e => {
+  if (!obj || obj.out != null) return;
+  const R = objR(), x = e.clientX, y = e.clientY;
+  const ox = W * obj.xr, oy = H * 0.5;
+  if (Math.hypot(x - ox, y - oy) > R * 1.4) return;
+  const now = performance.now();
+  if (now - lastTouch < 800) return;
+  lastTouch = now;
+  ensureAC();
+  obj.sq = 1;
+  touchSound();
+  touchFx(obj);
+});
+
+// ---- 支援者の操作 ----
+$('ringBtn').addEventListener('click', ring);
+$('showBtn').addEventListener('click', () => { ensureAC(); reveal(); });
+$('stopBtn').addEventListener('click', stopAll);
+
+// ---- 遊び方の説明（支援者用）----
+const intro = $('intro');
+let introTimer = null;
+function showIntro(){
+  clearTimeout(introTimer);
+  intro.classList.remove('hide');
+  introTimer = setTimeout(hideIntro, 14000);
+}
+function hideIntro(){
+  clearTimeout(introTimer);
+  intro.classList.add('hide');
+}
+$('introBtn').addEventListener('click', () => { ensureAC(); hideIntro(); });
+$('introAgainBtn').addEventListener('click', () => { closePanel(); showIntro(); });
+showIntro();
+
+const gear = $('gear');
+let holdTimer = null;
+function openPanel(){ markOpts(); $('panel').classList.add('open'); $('closeBtn').focus(); }
+function closePanel(){ $('panel').classList.remove('open'); gear.focus(); }
+gear.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  gear.classList.add('hold');
+  holdTimer = setTimeout(() => { gear.classList.remove('hold'); openPanel(); }, 1200);
+});
+['pointerup', 'pointerleave', 'pointercancel'].forEach(ev =>
+  gear.addEventListener(ev, () => { clearTimeout(holdTimer); gear.classList.remove('hold'); })
+);
+gear.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); openPanel(); }
+});
+
+function markOpts(){
+  const cur = {
+    stage: S.stage, dir: S.dir, pitch: S.pitch, reveal: S.reveal, trig: S.trig, gap: String(S.gap),
+    keep: S.keep ? 'on' : 'off', touchSnd: S.touchSnd ? 'on' : 'off', sound: S.sound ? 'on' : 'off',
+    musicSrc: S.musicSrc, musicLimit: String(S.musicLimit)
+  };
+  document.querySelectorAll('[data-set]').forEach(b => {
+    b.setAttribute('aria-pressed', String(cur[b.dataset.set] === b.dataset.v));
+  });
+  $('vol').value = S.vol; $('volLabel').textContent = S.vol + '%';
+  $('count').textContent = S.count;
+}
+
+$('vol').addEventListener('input', e => {
+  S.vol = Number(e.target.value);
+  $('volLabel').textContent = S.vol + '%';
+  applyVol();
+});
+$('fileBtn').addEventListener('click', () => $('musicFile').click());
+function updateTrackLabel(){
+  $('fileName').textContent = playlist.length
+    ? '選んだ曲（' + playlist.length + '曲）：' + playlist.map(t => t.name).join('、')
+    : '選んだ曲：なし';
+}
+function clearPlaylist(){
+  stopMusic(true);
+  audioEl.pause();
+  playlist.forEach(t => { try{ URL.revokeObjectURL(t.url); }catch(_){} });
+  playlist = []; trackIdx = 0;
+  audioEl.removeAttribute('src');
+  if (S.musicSrc === 'file') S.musicSrc = 'box';
+  updateTrackLabel(); markOpts();
+}
+$('musicFile').addEventListener('change', e => {
+  const fs = Array.from(e.target.files || []);
+  if (!fs.length) return;
+  fs.forEach(f => playlist.push({ name: f.name, url: URL.createObjectURL(f) }));
+  S.musicSrc = 'file';
+  updateTrackLabel(); markOpts();
+  e.target.value = '';
+});
+$('clearBtn').addEventListener('click', clearPlaylist);
+
+// ---- 録音（支援者の歌・楽器の音。端末の中だけ。最長60秒。ページを閉じると消える）----
+let rec = null, recStream = null, recChunks = [], recTimer = null, recN = 0;
+function setRecUi(on){
+  const b = $('recBtn');
+  b.setAttribute('aria-pressed', String(on));
+  b.textContent = on ? '録音を止める' : '録音する（最長60秒）';
+  $('recNote').textContent = on
+    ? '録音しています。止めるときは、もう一度押してください。'
+    : '録音は、この端末の中だけに置き、ページを閉じると消えます。歌や楽器の音を録音してください。子どもの声は録音しないでください。';
+}
+// 録音ボタンに、結果を短く出す（失敗が見えるように）
+function recMsg(text){
+  const b = $('recBtn');
+  b.textContent = text;
+  clearTimeout(recMsgTimer);
+  recMsgTimer = setTimeout(() => { if (!rec && !recStarting) setRecUi(false); }, 4000);
+}
+let recMsgTimer = null, recStarting = false;
+async function startRec(){
+  if (rec || recStarting) return;
+  if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder){
+    recMsg('録音できません（公開URLで開いてください）');
+    $('recNote').textContent = '録音は、https（公開URL）で開いたときに使えます。Safari の設定で、マイクも許可してください。';
+    return;
+  }
+  recStarting = true;
+  $('recBtn').textContent = 'マイクを準備しています…';
+  stopAll();
+  try{ recStream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch(e){
+    recStarting = false;
+    recMsg('マイクが使えません（許可を確認）');
+    $('recNote').textContent = 'マイクの許可が必要です。設定の「Safari」→「マイク」で許可してから、もう一度押してください。';
+    return;
+  }
+  recStarting = false;
+  const types = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
+  const mt = window.MediaRecorder.isTypeSupported ? types.find(t => MediaRecorder.isTypeSupported(t)) : null;
+  rec = mt ? new MediaRecorder(recStream, { mimeType: mt }) : new MediaRecorder(recStream);
+  recChunks = [];
+  rec.ondataavailable = ev => { if (ev.data && ev.data.size) recChunks.push(ev.data); };
+  rec.onstop = () => {
+    clearTimeout(recTimer);
+    const type = (rec && rec.mimeType) || mt || 'audio/mp4';
+    if (recStream) recStream.getTracks().forEach(t => t.stop());
+    const blob = new Blob(recChunks, { type });
+    rec = null; recStream = null;
+    if (blob.size > 0){
+      playlist.push({ name: '録音' + (++recN), url: URL.createObjectURL(blob) });
+      S.musicSrc = 'file';
+    }
+    updateTrackLabel(); markOpts(); setRecUi(false);
+  };
+  rec.start();
+  recTimer = setTimeout(stopRec, 60000);
+  setRecUi(true);
+}
+function stopRec(){ if (rec && rec.state !== 'inactive') rec.stop(); }
+$('recBtn').addEventListener('click', () => { rec ? stopRec() : startRec(); });
+$('stopPanelBtn').addEventListener('click', stopAll);
+
+$('panel').addEventListener('click', e => {
+  if (e.target === $('panel')){ closePanel(); return; }
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.set){
+    const k = b.dataset.set, v = b.dataset.v;
+    if (k === 'stage'){ if (v !== S.stage) stopAll(); S.stage = v; }
+    if (k === 'dir') S.dir = v;
+    if (k === 'pitch') S.pitch = v;
+    if (k === 'reveal') S.reveal = v;
+    if (k === 'trig'){ S.trig = v; if (v === 'manual'){ clearTimeout(autoTimer); autoTimer = null; } }
+    if (k === 'gap') S.gap = Number(v);
+    if (k === 'keep'){ S.keep = v === 'on'; if (obj && obj.out == null && !obj.hold) obj.life = S.keep ? 1e9 : Math.max(obj.t + 3, 6); }
+    if (k === 'touchSnd') S.touchSnd = v === 'on';
+    if (k === 'sound'){ S.sound = v === 'on'; applyVol(); }
+    if (k === 'musicSrc'){ S.musicSrc = v; }
+    if (k === 'musicLimit') S.musicLimit = Number(v);
+    markOpts();
+  } else if (b.id === 'closeBtn'){
+    closePanel();
+  }
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && $('panel').classList.contains('open')) closePanel();
+});
+// 画面を離れたら、音を止める
+document.addEventListener('visibilitychange', () => { if (document.hidden){ stopAll(); stopRec(); } });
+</script>
+</body>
+</html>
